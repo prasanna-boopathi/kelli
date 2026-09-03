@@ -1,4 +1,6 @@
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/useAuth';
+import { getAppointments, getDoctors } from '../lib/api';
 import { 
   MessageSquare, 
   Calendar, 
@@ -9,20 +11,75 @@ import {
   ShieldCheck, 
   ArrowRight, 
   AlertCircle,
-  HeartPulse
+  HeartPulse,
+  Stethoscope,
+  CheckCircle2,
+  CalendarDays
 } from 'lucide-react';
 
 export default function Dashboard({ onNavigate, onStartChatWithPrompt }) {
-  const { user, patient } = useAuth();
+  const { user, patient, token } = useAuth();
+
+  const [upcomingAppointment, setUpcomingAppointment] = useState(null);
+  const [doctorsList, setDoctorsList] = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
 
   const patientName = patient?.name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Patient';
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadDashboardData() {
+      if (!token) return;
+      setLoadingData(true);
+
+      try {
+        // 1. Load real appointments
+        const apptData = await getAppointments(token);
+        if (isMounted && apptData && Array.isArray(apptData.appointments)) {
+          const activeAppts = apptData.appointments.filter(
+            (a) => a.status === 'confirmed' || a.status === 'pending_payment'
+          );
+          if (activeAppts.length > 0) {
+            setUpcomingAppointment(activeAppts[0]);
+          }
+        }
+
+        // 2. Load real doctors
+        const docData = await getDoctors(token);
+        if (isMounted && docData && Array.isArray(docData.doctors)) {
+          setDoctorsList(docData.doctors);
+        }
+      } catch (err) {
+        console.error('Error loading dashboard data:', err);
+      } finally {
+        if (isMounted) {
+          setLoadingData(false);
+        }
+      }
+    }
+
+    loadDashboardData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [token]);
+
   const samplePrompts = [
-    "Can you check Dr. Smith's available appointment slots for tomorrow?",
+    "Can you check Dr. Kumar's available appointment slots for tomorrow?",
     "What appointment slots are open for today?",
-    "I'd like to book an appointment with Dr. Kumar for tomorrow at 10:00 AM.",
+    "I'd like to book an appointment with Dr. Priya for tomorrow at 10:00 AM.",
     "What services and doctor consultations does the clinic offer?"
   ];
+
+  const formatTime = (timeStr) => {
+    if (!timeStr) return '';
+    if (timeStr.includes('10:00')) return '10:00 AM';
+    if (timeStr.includes('14:00')) return '2:00 PM';
+    if (timeStr.includes('17:00')) return '5:00 PM';
+    return timeStr;
+  };
 
   return (
     <div className="dashboard-page-container">
@@ -35,7 +92,7 @@ export default function Dashboard({ onNavigate, onStartChatWithPrompt }) {
           </div>
           <h1 className="hero-title">Welcome back, {patientName}! 👋</h1>
           <p className="hero-description">
-            Your patient portal is ready. Connect with <strong>Kelli</strong>, your AI clinic receptionist, to check doctor availability, book appointments, or update your profile.
+            Your clinic portal is live. Chat with <strong>Kelli</strong> to check real-time doctor availability, book appointments, make test consultation fee payments (₹500), or manage your schedule.
           </p>
 
           <div className="hero-actions">
@@ -59,24 +116,54 @@ export default function Dashboard({ onNavigate, onStartChatWithPrompt }) {
           </div>
         </div>
 
+        {/* Live Upcoming Appointment or Status Card */}
         <div className="hero-stat-card">
-          <div className="stat-header">
-            <HeartPulse size={20} className="text-primary" />
-            <span>Clinic Status</span>
-          </div>
-          <div className="stat-status-row">
-            <span className="status-indicator-dot" />
-            <span className="status-label">Kelli AI Receptionist Online</span>
-          </div>
-          <div className="stat-details">
-            <p><strong>Patient Email:</strong> {user?.email}</p>
-            {patient?.phone && <p><strong>Phone:</strong> {patient.phone}</p>}
-            <p><strong>Standard Slots:</strong> 10 AM • 2 PM • 5 PM</p>
-          </div>
+          {upcomingAppointment ? (
+            <div className="upcoming-appt-hero-box">
+              <div className="stat-header">
+                <CalendarCheck size={18} className="text-primary" />
+                <span>Next Scheduled Consultation</span>
+              </div>
+              <h4 className="upcoming-doctor-name">
+                {upcomingAppointment.doctor?.name || 'Clinic Doctor'}
+              </h4>
+              <p className="upcoming-doctor-spec">
+                {upcomingAppointment.doctor?.specialization || 'Medical Consultation'}
+              </p>
+              <div className="upcoming-meta-row">
+                <span className="meta-pill">
+                  <Calendar size={12} /> {upcomingAppointment.appointment_date}
+                </span>
+                <span className="meta-pill">
+                  <Clock size={12} /> {formatTime(upcomingAppointment.appointment_time)}
+                </span>
+              </div>
+              <div className="upcoming-status-tag">
+                <CheckCircle2 size={13} className="text-success" />
+                <span>Status: {upcomingAppointment.status === 'confirmed' ? 'Confirmed' : 'Pending Payment'}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="clinic-status-box">
+              <div className="stat-header">
+                <HeartPulse size={20} className="text-primary" />
+                <span>Clinic Portal Status</span>
+              </div>
+              <div className="stat-status-row">
+                <span className="status-indicator-dot" />
+                <span className="status-label">Kelli AI Receptionist Online</span>
+              </div>
+              <div className="stat-details">
+                <p><strong>Patient Email:</strong> {user?.email}</p>
+                {patient?.phone && <p><strong>Phone:</strong> {patient.phone}</p>}
+                <p><strong>Standard Slots:</strong> 10:00 AM • 2:00 PM • 5:00 PM</p>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
-      {/* Main Grid: Quick Access & Clinic Info */}
+      {/* Main Grid: Quick Access & Features */}
       <div className="dashboard-grid">
         {/* Quick Access Card 1: Chat with Kelli */}
         <div className="dashboard-feature-card" onClick={() => onNavigate('chat')}>
@@ -86,7 +173,7 @@ export default function Dashboard({ onNavigate, onStartChatWithPrompt }) {
           <div className="feature-card-body">
             <h3 className="feature-card-title">Chat with Kelli</h3>
             <p className="feature-card-desc">
-              Check real-time doctor availability, consult standard slots, and book appointments through natural conversation.
+              Speak with Kelli to check real-time doctor availability, consult standard slots, and reserve your appointment slot with Razorpay payment.
             </p>
           </div>
           <div className="feature-card-footer text-primary">
@@ -103,11 +190,11 @@ export default function Dashboard({ onNavigate, onStartChatWithPrompt }) {
           <div className="feature-card-body">
             <h3 className="feature-card-title">My Appointments</h3>
             <p className="feature-card-desc">
-              Review your scheduled clinic consultations, doctor details, appointment dates, and booking status.
+              Review your scheduled consultations, pay consultation fees (₹500), reschedule time slots, or cancel bookings in real time.
             </p>
           </div>
           <div className="feature-card-footer text-accent">
-            <span>View Schedule</span>
+            <span>Manage Schedule</span>
             <ArrowRight size={14} />
           </div>
         </div>
@@ -120,7 +207,7 @@ export default function Dashboard({ onNavigate, onStartChatWithPrompt }) {
           <div className="feature-card-body">
             <h3 className="feature-card-title">Patient Profile</h3>
             <p className="feature-card-desc">
-              Keep your contact information up to date so the clinic medical staff and doctors can reach you.
+              Keep your contact information up to date so Kelli and attending clinic doctors can identify and reach you.
             </p>
           </div>
           <div className="feature-card-footer text-purple">
@@ -129,6 +216,53 @@ export default function Dashboard({ onNavigate, onStartChatWithPrompt }) {
           </div>
         </div>
       </div>
+
+      {/* Real Active Doctors Directory Section */}
+      <section className="dashboard-prompts-section">
+        <div className="section-header">
+          <Stethoscope size={18} className="text-primary" />
+          <h2>Clinic Doctors & Schedules</h2>
+          <span className="section-subtitle">• Real database doctor directory</span>
+        </div>
+
+        <div className="doctors-directory-grid">
+          {doctorsList.length > 0 ? (
+            doctorsList.map((doc) => (
+              <div key={doc.id} className="doctor-directory-card">
+                <div className="doc-card-header">
+                  <div className="doc-icon-wrap">
+                    <Stethoscope size={18} />
+                  </div>
+                  <div>
+                    <h4 className="doc-name">{doc.name}</h4>
+                    <span className="doc-spec">{doc.specialization}</span>
+                  </div>
+                </div>
+                <div className="doc-days-row">
+                  <span className="days-label">Available Days:</span>
+                  <div className="days-badges">
+                    {Array.isArray(doc.available_days) && doc.available_days.map((d, i) => (
+                      <span key={i} className="day-badge">{d.slice(0, 3)}</span>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-book-with-doc"
+                  onClick={() => onStartChatWithPrompt(`Can you check available appointment slots for ${doc.name} tomorrow?`)}
+                >
+                  <CalendarDays size={13} />
+                  <span>Check Availability</span>
+                </button>
+              </div>
+            ))
+          ) : (
+            <div className="text-muted p-3">
+              {loadingData ? 'Loading doctors...' : 'Doctors directory loaded from clinic database.'}
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* Quick Prompts Section */}
       <section className="dashboard-prompts-section">
@@ -159,7 +293,7 @@ export default function Dashboard({ onNavigate, onStartChatWithPrompt }) {
         <div className="dashboard-info-card">
           <div className="info-card-header">
             <Clock size={18} className="text-primary" />
-            <h3>Clinic Hours & Scheduling</h3>
+            <h3>Clinic Hours & Consultation Windows</h3>
           </div>
           <div className="info-card-list">
             <div className="info-row">
@@ -172,7 +306,7 @@ export default function Dashboard({ onNavigate, onStartChatWithPrompt }) {
             </div>
             <div className="info-row text-muted">
               <span className="info-label">Sunday</span>
-              <span className="info-value">Closed (Urgent only)</span>
+              <span className="info-value">Closed (Emergency only)</span>
             </div>
           </div>
           <div className="slots-preview">

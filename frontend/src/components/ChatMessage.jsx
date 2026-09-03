@@ -6,10 +6,13 @@ import {
   Check, 
   CalendarCheck, 
   Calendar,
-  Sparkles
+  Sparkles,
+  CreditCard,
+  CheckCircle2,
+  Clock
 } from 'lucide-react';
 
-export default function ChatMessage({ message }) {
+export default function ChatMessage({ message, onProceedToPayment, isPaying }) {
   const [copied, setCopied] = useState(false);
   const isAssistant = message.role === 'assistant';
 
@@ -19,19 +22,30 @@ export default function ChatMessage({ message }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Check if content implies appointment booking or slot check
+  const textLower = (message.content || '').toLowerCase();
+
+  // Check if content implies appointment booking or pending payment
+  const isPendingPayment = isAssistant && (
+    textLower.includes('reserved') ||
+    textLower.includes('consultation fee') ||
+    textLower.includes('proceed to payment') ||
+    textLower.includes('complete the payment') ||
+    textLower.includes('₹500') ||
+    textLower.includes('500')
+  );
+
   const isAppointmentSuccess = isAssistant && (
-    message.content.toLowerCase().includes('successfully') ||
-    message.content.toLowerCase().includes('confirmed') ||
-    message.content.toLowerCase().includes('appointment booked')
+    textLower.includes('successfully') ||
+    textLower.includes('confirmed') ||
+    textLower.includes('appointment booked')
   );
 
   const hasSlotList = isAssistant && (
-    message.content.toLowerCase().includes('available slots') ||
-    message.content.toLowerCase().includes('available:') ||
-    message.content.toLowerCase().includes('10:00:00') ||
-    message.content.toLowerCase().includes('14:00:00') ||
-    message.content.toLowerCase().includes('17:00:00')
+    textLower.includes('available slots') ||
+    textLower.includes('available:') ||
+    textLower.includes('10:00:00') ||
+    textLower.includes('14:00:00') ||
+    textLower.includes('17:00:00')
   );
 
   // Render markdown-like simple formatting (bold, newlines, bullet lists)
@@ -102,16 +116,24 @@ export default function ChatMessage({ message }) {
           </span>
         </div>
 
-        {/* Special callout banner for appointment confirmations */}
-        {isAppointmentSuccess && (
+        {/* Special callout banner for appointment reservations requiring payment */}
+        {isPendingPayment && !message.isPaid && (
+          <div className="special-callout warning-callout">
+            <Clock size={15} className="callout-icon" />
+            <span>Slot Reserved • Payment Required (₹500)</span>
+          </div>
+        )}
+
+        {/* Special callout banner for confirmed appointments */}
+        {(isAppointmentSuccess || message.isPaid) && (
           <div className="special-callout success-callout">
             <CalendarCheck size={16} className="callout-icon" />
-            <span>Appointment Record Processed</span>
+            <span>Appointment Record Confirmed</span>
           </div>
         )}
 
         {/* Special callout for available slots */}
-        {hasSlotList && !isAppointmentSuccess && (
+        {hasSlotList && !isAppointmentSuccess && !isPendingPayment && (
           <div className="special-callout info-callout">
             <Calendar size={16} className="callout-icon" />
             <span>Doctor Availability Checked</span>
@@ -122,6 +144,35 @@ export default function ChatMessage({ message }) {
           <div className="message-body">
             {renderFormattedText(message.content)}
           </div>
+
+          {/* Interactive Razorpay Payment Card inside Chat */}
+          {isPendingPayment && !message.isPaid && onProceedToPayment && (
+            <div className="chat-payment-card">
+              <div className="payment-card-info">
+                <div className="fee-badge">
+                  <CreditCard size={15} />
+                  <span>Consultation Fee: <strong>₹500</strong></span>
+                </div>
+                <span className="test-mode-badge">Razorpay Test Mode</span>
+              </div>
+              <button
+                type="button"
+                className="btn-chat-pay"
+                onClick={() => onProceedToPayment(message)}
+                disabled={isPaying}
+              >
+                <CreditCard size={15} />
+                <span>{isPaying ? 'Processing Payment...' : 'Proceed to Payment (₹500)'}</span>
+              </button>
+            </div>
+          )}
+
+          {message.isPaid && (
+            <div className="chat-payment-verified-badge">
+              <CheckCircle2 size={16} className="text-success" />
+              <span>Payment of ₹500 Verified Successfully</span>
+            </div>
+          )}
 
           <div className="bubble-actions">
             <button 

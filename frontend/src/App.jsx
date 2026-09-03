@@ -47,6 +47,7 @@ function MainApp() {
             <ChatPage 
               initialPrompt={chatInitialPrompt}
               onClearInitialPrompt={() => setChatInitialPrompt('')}
+              onNavigateToAppointments={() => setActiveTab('appointments')}
             />
           )}
 

@@ -1,5 +1,5 @@
 /**
- * API Service for Kelli Healthcare AI Receptionist
+ * API Service for Kelli Healthcare AI Receptionist & Patient Portal
  */
 
 const SESSION_STORAGE_KEY = 'kelli_session_id';
@@ -100,7 +100,6 @@ export async function apiFetch(endpoint, options = {}, token = null) {
 /**
  * Get the current authenticated patient's profile
  * @param {string} token - Supabase access token
- * @returns {Promise<{authenticated: boolean, user: object, patient: object}>}
  */
 export async function getPatientProfile(token) {
   if (!token) {
@@ -113,7 +112,6 @@ export async function getPatientProfile(token) {
  * Update the current authenticated patient's profile
  * @param {{name?: string, phone?: string}} updates - Profile updates
  * @param {string} token - Supabase access token
- * @returns {Promise<{success: boolean, patient: object}>}
  */
 export async function updatePatientProfile(updates, token) {
   if (!token) {
@@ -124,6 +122,100 @@ export async function updatePatientProfile(updates, token) {
     {
       method: 'PATCH',
       body: JSON.stringify(updates),
+    },
+    token
+  );
+}
+
+/**
+ * Get all doctors and their specializations and available days
+ */
+export async function getDoctors(token = null) {
+  return await apiFetch('/api/doctors', { method: 'GET' }, token);
+}
+
+/**
+ * Get all appointments for the authenticated patient
+ * @param {string} token - Supabase access token
+ */
+export async function getAppointments(token) {
+  if (!token) {
+    throw new Error('Authentication token is required to load appointments.');
+  }
+  return await apiFetch('/api/appointments', { method: 'GET' }, token);
+}
+
+/**
+ * Cancel an appointment for the authenticated patient
+ * @param {string} appointmentId
+ * @param {string} token
+ */
+export async function cancelAppointmentApi(appointmentId, token) {
+  if (!token) {
+    throw new Error('Authentication token is required to cancel an appointment.');
+  }
+  return await apiFetch(`/api/appointments/${appointmentId}/cancel`, { method: 'PATCH' }, token);
+}
+
+/**
+ * Reschedule an appointment for the authenticated patient
+ * @param {string} appointmentId
+ * @param {string} date - New date
+ * @param {string} time - New time
+ * @param {string} token
+ */
+export async function rescheduleAppointmentApi(appointmentId, date, time, token) {
+  if (!token) {
+    throw new Error('Authentication token is required to reschedule an appointment.');
+  }
+  return await apiFetch(
+    `/api/appointments/${appointmentId}/reschedule`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ date, time }),
+    },
+    token
+  );
+}
+
+/**
+ * Create a Razorpay payment order for consultation fee
+ * @param {string} [appointmentId]
+ * @param {string} token
+ */
+export async function createPaymentOrderApi(appointmentId = null, token) {
+  if (!token) {
+    throw new Error('Authentication token is required to create a payment order.');
+  }
+  return await apiFetch(
+    '/api/payment/create-order',
+    {
+      method: 'POST',
+      body: JSON.stringify({ appointmentId }),
+    },
+    token
+  );
+}
+
+/**
+ * Verify Razorpay payment signature on backend
+ * @param {object} payload - { orderId, paymentId, signature, appointmentId }
+ * @param {string} token
+ */
+export async function verifyPaymentApi({ orderId, paymentId, signature, appointmentId }, token) {
+  if (!token) {
+    throw new Error('Authentication token is required to verify payment.');
+  }
+  return await apiFetch(
+    '/api/payment/verify',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        orderId,
+        paymentId,
+        signature,
+        appointmentId,
+      }),
     },
     token
   );

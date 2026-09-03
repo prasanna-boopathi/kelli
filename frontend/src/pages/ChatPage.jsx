@@ -7,8 +7,11 @@ import QuickPrompts from '../components/QuickPrompts';
 import { 
   getOrCreateSessionId, 
   resetSessionId, 
-  sendChatMessage 
+  sendChatMessage,
+  createPaymentOrderApi,
+  verifyPaymentApi
 } from '../lib/api';
+import { openRazorpayCheckout } from '../lib/razorpay';
 import { 
   Stethoscope, 
   AlertCircle, 
@@ -19,25 +22,29 @@ import {
   Copy,
   Check,
   PanelLeft,
-  PanelLeftClose
+  PanelLeftClose,
+  CheckCircle2,
+  Calendar
 } from 'lucide-react';
 
 const INITIAL_GREETING = {
   id: 'greeting',
   role: 'assistant',
-  content: `Hello! 👋 I'm **Kelli**, your AI medical clinic receptionist.\n\nI can assist you with:\n* 🗓️ **Checking doctor availability** for any date\n* 📋 **Booking appointments** for consultation slots\n* ⏰ **Standard daily slots** (10:00 AM, 2:00 PM, and 5:00 PM)\n* 💬 **Answering clinic procedure and service inquiries**\n\nHow may I help you today?`,
+  content: `Hello! 👋 I'm **Kelli**, your AI medical clinic receptionist.\n\nI can assist you with:\n* 🗓️ **Checking doctor availability** for any date\n* 📋 **Booking appointments** for consultation slots\n* ⏰ **Standard daily slots** (10:00 AM, 2:00 PM, and 5:00 PM)\n* 💳 **Secure Razorpay consultation fee payments (₹500)**\n* 💬 **Answering clinic procedure and service inquiries**\n\nHow may I help you today?`,
   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 };
 
-export default function ChatPage({ initialPrompt, onClearInitialPrompt }) {
-  const { token } = useAuth();
+export default function ChatPage({ initialPrompt, onClearInitialPrompt, onNavigateToAppointments }) {
+  const { token, user, patient } = useAuth();
   const [sessionId, setSessionId] = useState(() => getOrCreateSessionId());
   const [messages, setMessages] = useState([INITIAL_GREETING]);
   const [loading, setLoading] = useState(false);
+  const [paymentLoading, setPaymentLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastFailedMessage, setLastFailedMessage] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [copiedSession, setCopiedSession] = useState(false);
+  const [paymentSuccessNotice, setPaymentSuccessNotice] = useState(null);
   const messagesEndRef = useRef(null);
   const initialPromptProcessed = useRef(false);
 
@@ -93,10 +100,86 @@ export default function ChatPage({ initialPrompt, onClearInitialPrompt }) {
     }
   }, [loading, sessionId, token]);
 
+  // Handle Razorpay Payment flow directly from chat card
+  const handleProceedToPayment = async (messageItem) => {
+    setError(null);
+    setPaymentLoading(true);
+
+    try {
+      // 1. Create Razorpay order on backend
+      const orderData = await createPaymentOrderApi(null, token);
+
+      if (!orderData || !orderData.orderId) {
+        throw new Error('Failed to generate payment order from clinic server.');
+      }
+
+      // 2. Launch Razorpay Checkout Modal
+      await openRazorpayCheckout({
+        orderId: orderData.orderId,
+        amount: orderData.amount,
+        currency: orderData.currency || 'INR',
+        keyId: orderData.keyId,
+        patientName: patient?.name || user?.user_metadata?.full_name || 'Patient',
+        patientEmail: user?.email || '',
+        patientPhone: patient?.phone || '',
+        onSuccess: async (paymentResponse) => {
+          try {
+            // 3. Verify payment signature on backend
+            const verifyResult = await verifyPaymentApi(
+              {
+                orderId: paymentResponse.orderId,
+                paymentId: paymentResponse.paymentId,
+                signature: paymentResponse.signature,
+              },
+              token
+            );
+
+            if (verifyResult && verifyResult.success) {
+              // Update message state to show verified payment
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === messageItem.id ? { ...m, isPaid: true } : m
+                )
+              );
+
+              // Add confirmation message
+              const confirmationMsg = {
+                id: `assistant-confirm-${Date.now()}`,
+                role: 'assistant',
+                content: `🎉 **Payment Verified Successfully!** (Payment ID: \`${paymentResponse.paymentId}\`)\n\nYour appointment has been confirmed in the clinic schedule. You can view all consultation details in **My Appointments**.`,
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                isPaid: true
+              };
+              setMessages((prev) => [...prev, confirmationMsg]);
+              setPaymentSuccessNotice('Payment completed & appointment confirmed!');
+              setTimeout(() => setPaymentSuccessNotice(null), 5000);
+            }
+          } catch (verifyErr) {
+            console.error('Payment verification error:', verifyErr);
+            setError(verifyErr.message || 'Payment signature verification failed.');
+          } finally {
+            setPaymentLoading(false);
+          }
+        },
+        onDismiss: () => {
+          setPaymentLoading(false);
+        },
+        onError: (err) => {
+          setError(err.message || 'Razorpay checkout encountered an issue.');
+          setPaymentLoading(false);
+        },
+      });
+    } catch (err) {
+      console.error('Payment initialization error:', err);
+      setError(err.message || 'Unable to start payment checkout. Please try again.');
+      setPaymentLoading(false);
+    }
+  };
+
   // Auto-scroll to bottom whenever messages or loading changes
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading, error]);
+  }, [messages, loading, error, paymentSuccessNotice]);
 
   // Handle initial prompt passed from Dashboard or Appointments
   useEffect(() => {
@@ -210,10 +293,27 @@ export default function ChatPage({ initialPrompt, onClearInitialPrompt }) {
               <span>Verified Clinic System</span>
             </div>
             <span className="banner-divider">•</span>
-            <span>Instant doctor schedule synchronization</span>
+            <span>Real-time doctor calendar integration</span>
             <span className="banner-divider">•</span>
-            <span>Secure patient appointment processing</span>
+            <span>Razorpay Secure Test Payments</span>
           </div>
+
+          {/* Payment Success Alert */}
+          {paymentSuccessNotice && (
+            <div className="chat-payment-alert-banner" role="status">
+              <CheckCircle2 size={18} className="text-success" />
+              <span>{paymentSuccessNotice}</span>
+              {onNavigateToAppointments && (
+                <button
+                  type="button"
+                  className="btn-banner-link"
+                  onClick={onNavigateToAppointments}
+                >
+                  <Calendar size={13} /> View My Appointments
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Error Banner */}
           {error && (
@@ -247,7 +347,12 @@ export default function ChatPage({ initialPrompt, onClearInitialPrompt }) {
           <div className="messages-scroll-area">
             <div className="messages-feed">
               {messages.map((msg) => (
-                <ChatMessage key={msg.id} message={msg} />
+                <ChatMessage 
+                  key={msg.id} 
+                  message={msg}
+                  onProceedToPayment={handleProceedToPayment}
+                  isPaying={paymentLoading}
+                />
               ))}
 
               {/* Typing Indicator */}
@@ -289,11 +394,11 @@ export default function ChatPage({ initialPrompt, onClearInitialPrompt }) {
 
             <ChatInput
               onSendMessage={handleSendMessage}
-              disabled={loading}
+              disabled={loading || paymentLoading}
             />
 
             <div className="footer-disclaimer">
-              <span>Kelli AI Healthcare Receptionist • Powered by Clinic Database Integration</span>
+              <span>Kelli AI Healthcare Receptionist • Powered by Clinic Database & Razorpay Payments</span>
             </div>
           </footer>
         </main>
